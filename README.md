@@ -21,8 +21,8 @@ Un simulador de red LAN escrito en Python con una interfaz de línea de comandos
 
 1. Clona el repositorio:
    ```bash
-   git clone <url-del-repo>
-   cd "simulador cable lan"
+   git clone https://github.com/RamonGbit/ServidorLan.git
+   cd "ServidorLan"
    ```
 
 2. Ejecuta el simulador:
