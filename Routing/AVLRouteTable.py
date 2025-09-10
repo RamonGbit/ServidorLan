@@ -61,49 +61,22 @@ class AVLRouteTable:
 
         Args:
             prefix (str): Prefijo de red (IP).
-            mask (str): Máscara de red (decimal o longitud de prefijo).
+            mask (str): Máscara de red.
             next_hop (str): Siguiente salto.
             metric (int): Métrica de la ruta.
             command (str, optional): Comando asociado para log de error.
         """
         try:
-            mask_len = self._mask_to_length(mask)
-            if mask_len is None or not self._valid_prefix_mask(prefix, mask_len):
+            if not self._valid_prefix_mask(prefix, mask):
                 log_error("InsertError", f"Prefijo o máscara inválida: {prefix}/{mask}", command)
                 return
-            # Guardar la máscara como longitud de prefijo internamente
-            self.root, rotation = self._insert(self.root, prefix, str(mask_len), next_hop, metric)
+            self.root, rotation = self._insert(self.root, prefix, mask, next_hop, metric)
             self.stats['nodes'] = self._count_nodes(self.root)
             self.stats['height'] = self._get_height(self.root)
             if rotation:
                 self.stats[rotation] += 1
         except Exception as e:
             log_error("InsertError", f"Error insertando ruta {prefix}/{mask}: {e}", command)
-
-    def _mask_to_length(self, mask):
-        """Convierte una máscara en formato decimal o longitud de prefijo a longitud de prefijo (int)."""
-        if isinstance(mask, int):
-            return mask if 0 <= mask <= 32 else None
-        try:
-            # Si ya es un número tipo string
-            mask_int = int(mask)
-            if 0 <= mask_int <= 32:
-                return mask_int
-        except Exception:
-            pass
-        # Si es formato decimal
-        if isinstance(mask, str) and '.' in mask:
-            try:
-                parts = [int(p) for p in mask.split('.')]
-                if len(parts) != 4:
-                    return None
-                bin_str = ''.join(f'{p:08b}' for p in parts)
-                if '01' in bin_str:
-                    return None  # No es máscara válida
-                return bin_str.count('1')
-            except Exception:
-                return None
-        return None
 
     def _insert(self, node, prefix, mask, next_hop, metric):
         if not node:
@@ -259,7 +232,7 @@ class AVLRouteTable:
             log_error("FindError", f"Error buscando ruta {prefix}/{mask}: {e}", command)
             return None
     def _valid_prefix_mask(self, prefix, mask):
-        # Validación simple de IP y longitud de prefijo
+        # Validación simple de IP y máscara (puede mejorarse)
         try:
             parts = prefix.split('.')
             if len(parts) != 4 or not all(0 <= int(p) <= 255 for p in parts):
