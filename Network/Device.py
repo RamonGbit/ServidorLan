@@ -6,6 +6,7 @@ Proporciona clases para representar dispositivos e interfaces de red.
 from DataStructures.LinkedList import LinkedList
 from Comunication.Packet import PacketQueue
 from Comunication.Packet import PacketHistory
+from Routing.AVLRouteTable import AVLRouteTable
 
 class Interface:
     """Representa una interfaz de red de un dispositivo.
@@ -65,8 +66,10 @@ class Device:
         Raises:
             ValueError: Si la interfaz no existe o el dispositivo está offline.
         """
+        from ErrorLog import log_error
         iface = self.get_interface(iface_name)
         if not iface or not self.online:
+            log_error('ConnectionError', 'Interfaz no encontrada o dispositivo offline', f'receive_packet iface={iface_name}')
             raise ValueError('Interfaz no encontrada o dispositivo offline')
         iface.packet_queue.enqueue(packet)
 
@@ -215,7 +218,7 @@ class Router(Device):
     Args:
         name (str): Nombre del router.
     """
-    def __init__(self, name):
+    def __init__(self, name, policy_trie=None):
         """
         Inicializa un router.
 
@@ -223,6 +226,66 @@ class Router(Device):
             name (str): Nombre del router.
         """
         super().__init__(name, 'router')
+        self.route_table = AVLRouteTable()
+        self.policy_trie = policy_trie
+    def process_packets(self, statistics=None):
+        from ErrorLog import log_error
+        seen_delivered = set()
+        current_iface = self.interfaces.head
+        while current_iface:
+            iface = current_iface.data
+            if not iface.packet_queue.is_empty():
+                packet = iface.packet_queue.dequeue()
+                # Chequeo de políticas antes de cualquier reenvío
+                policy = None
+                if self.policy_trie:
+                    policy = self.policy_trie.get_policy(packet.destination_ip)
+                if policy:
+                    if 'block' in policy and policy['block']:
+                        if statistics:
+                            statistics.log_dropped_policy()
+                        log_error('PolicyError', f"Paquete bloqueado por política en router {self.name}", f"dest={packet.destination_ip}")
+                        print(f"[Tick] {self.name}: packet dropped (policy block)")
+                        current_iface = current_iface.next
+                        continue
+                    if 'ttl-min' in policy and packet.ttl < policy['ttl-min']:
+                        if statistics:
+                            statistics.log_dropped_policy()
+                        log_error('PolicyError', f"Paquete descartado por TTL menor a política en router {self.name}", f"dest={packet.destination_ip} ttl={packet.ttl}")
+                        print(f"[Tick] {self.name}: packet dropped (policy ttl-min)")
+                        current_iface = current_iface.next
+                        continue
+                arrived = False
+                check_node = self.interfaces.head
+                while check_node:
+                    if check_node.data.ip_address == packet.destination_ip:
+                        arrived = True
+                        break
+                    check_node = check_node.next
+                if arrived:
+                    if packet.packet_id not in seen_delivered:
+                        seen_delivered.add(packet.packet_id)
+                        self.packet_history.push(packet)
+                        if statistics:
+                            hops = packet.route_trace.size
+                            statistics.log_delivered(hops, self.name)
+                        print(f"[Tick] {self.name}: packet delivered (TTL={packet.ttl})")
+                else:
+                    packet.ttl -= 1
+                    packet.add_hop(self.name)
+                    if packet.ttl > 0:
+                        self.packet_history.push(packet)
+                        first_neighbor = iface.neighbors.head
+                        if first_neighbor:
+                            neighbor_iface = first_neighbor.data
+                            neighbor_iface.next_packet_queue.enqueue(packet)
+                            print(f"[Tick] {self.name} → {neighbor_iface.name}: packet forwarded (TTL={packet.ttl})")
+                    else:
+                        if statistics:
+                            statistics.log_dropped_ttl()
+                        log_error('TTLExpired', f"Paquete descartado por TTL expirado en router {self.name}", f"dest={packet.destination_ip} ttl=0")
+                        print(f"[Tick] {self.name}: packet dropped (TTL expired)")
+            current_iface = current_iface.next
 
 
 class Switch(Device):

@@ -86,8 +86,12 @@ class ConfigManager:
                     neighbor_node = neighbor_node.next
                 iface_node = iface_node.next
             node = node.next
-        with open(filename, 'w') as f:
-            json.dump(data, f, indent=4)
+        try:
+            with open(filename, 'w') as f:
+                json.dump(data, f, indent=4)
+        except Exception as e:
+            from ErrorLog import log_error
+            log_error('PersistenceError', f'Error guardando configuración: {e}', f'save_running_config {filename}')
 
     @staticmethod
     def load_config(network, filename):
@@ -100,30 +104,33 @@ class ConfigManager:
         Returns:
             None
         """
-        # Cargar desde JSON
-        with open(filename, 'r') as f:
-            data = json.load(f)
-        # Reiniciar red
-        network.devices = LinkedList()
-        # Mapear tipos a clases
-        type_map = {
-            'router': Router,
-            'switch': Switch,
-            'host': Host,
-            'firewall': Firewall
-        }
-        # Crear dispositivos e interfaces
-        for dev in data.get('devices', []):
-            cls = type_map.get(dev.get('device_type'), Router)
-            obj = cls(dev.get('name'))
-            obj.online = dev.get('online', True)
-            for iface in dev.get('interfaces', []):
-                obj.add_interface(iface.get('name'))
-                inf = obj.get_interface(iface.get('name'))
-                inf.ip_address = iface.get('ip_address')
-                inf.status = iface.get('status', 'down')
-            network.add_device(obj)
-        # Reconstruir conexiones
-        for conn in data.get('connections', []):
-            if len(conn) == 4:
-                network.connect(conn[0], conn[1], conn[2], conn[3])
+        from ErrorLog import log_error
+        try:
+            with open(filename, 'r') as f:
+                data = json.load(f)
+        except Exception as e:
+            log_error('PersistenceError', f'Error abriendo/cargando archivo: {e}', f'load_config {filename}')
+            return
+        try:
+            network.devices = LinkedList()
+            type_map = {
+                'router': Router,
+                'switch': Switch,
+                'host': Host,
+                'firewall': Firewall
+            }
+            for dev in data.get('devices', []):
+                cls = type_map.get(dev.get('device_type'), Router)
+                obj = cls(dev.get('name'))
+                obj.online = dev.get('online', True)
+                for iface in dev.get('interfaces', []):
+                    obj.add_interface(iface.get('name'))
+                    inf = obj.get_interface(iface.get('name'))
+                    inf.ip_address = iface.get('ip_address')
+                    inf.status = iface.get('status', 'down')
+                network.add_device(obj)
+            for conn in data.get('connections', []):
+                if len(conn) == 4:
+                    network.connect(conn[0], conn[1], conn[2], conn[3])
+        except Exception as e:
+            log_error('PersistenceError', f'Error reconstruyendo red: {e}', f'load_config {filename}')
